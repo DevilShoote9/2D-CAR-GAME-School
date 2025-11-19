@@ -1,7 +1,4 @@
 # launcher.py
-"""
-Dark launcher with black-themed leaderboard (date-only) and secure resume.
-"""
 
 import tkinter as tk
 from tkinter import messagebox, ttk

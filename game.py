@@ -1,12 +1,8 @@
 # game.py
-"""
-Pygame: black + neon themed UI, improved in-game leaderboard with date-only.
-Subtle animated particles in menus for a livelier feel.
-"""
 
 import pygame as pg
 from pathlib import Path
-import sys, random as rnd, time
+import random as rnd
 import db
 from db import save_score
 

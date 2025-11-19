@@ -2,7 +2,6 @@
 import sqlite3 as sq
 import hashlib
 from datetime import datetime
-import os
 
 DB = 'car_game.db'
 
