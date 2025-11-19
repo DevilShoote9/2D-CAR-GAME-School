@@ -51,20 +51,30 @@ class Button:
         else: self.pulse = max(0.0, self.pulse - dt*0.02)
 
     def draw(self, surf):
-        pulse_scale = 1.0 + 0.05 * (self.pulse**2)
+        pulse_scale = 1.0 + 0.03 * (self.pulse)
         w, h = int(self.rect.w * pulse_scale), int(self.rect.h * pulse_scale)
         center = self.rect.center
         draw_rect = pg.Rect(0,0,w,h); draw_rect.center = center
-        color = [int(self.base_color[i] + (self.hover_color[i]-self.base_color[i]) * self.pulse) for i in range(3)]
+
+        # softened hover color
+        color = [
+            int(self.base_color[i] + (self.hover_color[i] - self.base_color[i]) * (self.pulse * 0.6))
+            for i in range(3)
+        ]
+
+        # background rect
         pg.draw.rect(surf, color, draw_rect, border_radius=12)
-        # neon outline when hovered
-        if self.pulse > 0.01:
-            outline = pg.Surface((draw_rect.w+8, draw_rect.h+8), pg.SRCALPHA)
-            glow_col = (*ACCENT, int(80 * self.pulse))
-            pg.draw.rect(outline, glow_col, outline.get_rect(), border_radius=14)
-            surf.blit(outline, (draw_rect.x-4, draw_rect.y-4), special_flags=pg.BLEND_RGBA_ADD)
-        txt_s = self.font.render(self.text, True, (230,230,230))
+
+        # soft glow *behind* button
+        if self.hovering:
+            glow = pg.Surface((draw_rect.w+22, draw_rect.h+22), pg.SRCALPHA)
+            pg.draw.rect(glow, (*ACCENT, 60), glow.get_rect(), border_radius=20)
+            surf.blit(glow, (draw_rect.x - 11, draw_rect.y - 11), special_flags=pg.BLEND_RGBA_ADD)
+
+        # high-contrast text
+        txt_s = self.font.render(self.text, True, (255,255,255))
         surf.blit(txt_s, (center[0] - txt_s.get_width()//2, center[1] - txt_s.get_height()//2))
+
 
     def clicked(self, mouse_pos): return self.rect.collidepoint(mouse_pos)
 
@@ -310,31 +320,52 @@ def run_game(username, user_id, selected_car, difficulty):
     # Game over UI
     def show_game_over_screen():
         show = True
-        gb_w, gb_h = 180, 48
-        b_view = Button((SCREEN_W//2 - gb_w - 10, SCREEN_H//2 + 40, gb_w, gb_h), "View Leaderboard", font)
-        b_menu = Button((SCREEN_W//2 + 10, SCREEN_H//2 + 40, gb_w, gb_h), "Back to Menu", font)
+        bw = 180; bh = 48
+
+        b_restart = Button((SCREEN_W//2 - bw//2, SCREEN_H//2 + 20, bw, bh), "Restart", font)
+        b_view = Button((SCREEN_W//2 - bw - 10, SCREEN_H//2 + 80, bw, bh), "Leaderboard", font)
+        b_menu = Button((SCREEN_W//2 + 10, SCREEN_H//2 + 80, bw, bh), "Menu", font)
+
         while show:
             dt = clock.tick(FPS)
             for ev in pg.event.get():
-                if ev.type == pg.QUIT: return 'quit'
-                if ev.type == pg.KEYDOWN:
-                    if ev.key == pg.K_ESCAPE: return 'menu'
+                if ev.type == pg.QUIT: return "quit"
+                if ev.type == pg.KEYDOWN and ev.key == pg.K_ESCAPE:
+                    return "menu"
                 if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
-                    if b_view.clicked(pg.mouse.get_pos()): return 'leaderboard'
-                    if b_menu.clicked(pg.mouse.get_pos()): return 'menu'
+                    mpos = pg.mouse.get_pos()
+                    if b_restart.clicked(mpos): return "restart"
+                    if b_view.clicked(mpos): return "leaderboard"
+                    if b_menu.clicked(mpos): return "menu"
+
             screen.fill((6,6,6))
-            go = big_font.render("GAME OVER", True, (255,80,80)); sc_txt = font.render(f"Score: {score}", True, (230,230,230))
-            screen.blit(go, (SCREEN_W//2 - go.get_width()//2, SCREEN_H//2 - 60)); screen.blit(sc_txt, (SCREEN_W//2 - sc_txt.get_width()//2, SCREEN_H//2))
-            b_view.update(pg.mouse.get_pos(), dt); b_menu.update(pg.mouse.get_pos(), dt)
-            b_view.draw(screen); b_menu.draw(screen)
+            go = big_font.render("GAME OVER", True, (255,80,80))
+            sc_txt = font.render(f"Score: {score}", True, (230,230,230))
+            screen.blit(go, (SCREEN_W//2 - go.get_width()//2, SCREEN_H//2 - 80))
+            screen.blit(sc_txt, (SCREEN_W//2 - sc_txt.get_width()//2, SCREEN_H//2 - 20))
+
+            for b in (b_restart, b_view, b_menu):
+                b.update(pg.mouse.get_pos(), dt)
+                b.draw(screen)
+
             pg.display.flip()
-        return 'menu'
+
+        return "menu"
 
     if user_id:
         try: save_score(user_id, score, difficulty)
         except Exception: pass
 
     res = show_game_over_screen()
-    if res == 'leaderboard': show_leaderboard_screen()
 
-    pg.quit(); return
+    if res == "leaderboard":
+        show_leaderboard_screen()
+
+    elif res == "restart":
+        pg.quit()
+        return run_game(username, user_id, selected_car, difficulty)
+
+    # go back to menu
+    pg.quit()
+    return
+
