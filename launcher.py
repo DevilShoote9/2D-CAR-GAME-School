@@ -57,12 +57,32 @@ def safe_load_image(name, w=None, h=None):
 
 class DarkButton(tk.Button):
     def __init__(self, master=None, **kw):
-        kw.setdefault('bg', BTN_BG); kw.setdefault('activebackground', BTN_ACTIVE)
-        kw.setdefault('fg', FG); kw.setdefault('bd', 0); kw.setdefault('relief', 'flat')
+        kw.setdefault('bg', BTN_BG)
+        kw.setdefault('activebackground', BTN_ACTIVE)
+        kw.setdefault('fg', FG)
+        kw.setdefault('bd', 0)
+        kw.setdefault('relief', 'flat')
         kw.setdefault('font', ('Helvetica', 11, 'bold'))
         super().__init__(master, **kw)
-        self.bind("<Enter>", lambda e: self.configure(bg=BTN_ACTIVE))
-        self.bind("<Leave>", lambda e: self.configure(bg=BTN_BG))
+        # improved hover: change bg and fg for visibility
+        self._normal_bg = kw.get('bg', BTN_BG)
+        self._normal_fg = kw.get('fg', FG)
+        self._hover_bg = kw.get('activebackground', BTN_ACTIVE)
+        self._hover_fg = ACCENT
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+
+    def _on_enter(self, e):
+        try:
+            self.configure(bg=self._hover_bg, fg=self._hover_fg)
+        except Exception:
+            pass
+
+    def _on_leave(self, e):
+        try:
+            self.configure(bg=self._normal_bg, fg=self._normal_fg)
+        except Exception:
+            pass
 
 class Launcher:
     def __init__(self, root):
@@ -111,8 +131,9 @@ class Launcher:
 
     def _build_footer(self):
         footer = tk.Frame(self.container, bg=BG, height=80); footer.pack(fill='x', pady=(0,12))
-        self.btn_start = DarkButton(footer, text="START", width=14, command=self.launch_game, state='disabled'); self.btn_start.pack(side='left', padx=18)
-        self.btn_scores = DarkButton(footer, text="High Scores", width=12, command=self.show_highscores); self.btn_scores.pack(side='left')
+        self.btn_start = DarkButton(footer, text="START", width=14, command=self.launch_game, state='disabled'); self.btn_start.pack(side='left', padx=14)
+        self.btn_scores = DarkButton(footer, text="High Scores", width=12, command=self.show_highscores); self.btn_scores.pack(side='left', padx=(0,6))
+        self.btn_help = DarkButton(footer, text="Help", width=10, command=self.show_help); self.btn_help.pack(side='left', padx=(0,6))
         self.btn_quit = DarkButton(footer, text="Quit", width=10, command=self.root.quit); self.btn_quit.pack(side='right', padx=18)
 
     def clear_card(self):
@@ -200,6 +221,7 @@ class Launcher:
         act_row = tk.Frame(self.card, bg=PANEL); act_row.pack(fill='x', pady=(10,0))
         DarkButton(act_row, text="Logout", width=12, command=self.logout).pack(side='left')
         DarkButton(act_row, text="High Scores", width=12, command=self.show_highscores).pack(side='left', padx=(8,0))
+        DarkButton(act_row, text="Help", width=12, command=self.show_help).pack(side='left', padx=(8,0))
 
         self.difficulty = self.diff_var.get(); self.cfg['difficulty'] = self.difficulty; save_config(self.cfg)
         self.enable_start_if_logged()
@@ -306,6 +328,57 @@ class Launcher:
             messagebox.showerror("Game error", f"Game crashed: {e}")
         finally:
             self.root.deiconify(); self.show_menu()
+
+    def show_help(self):
+        # comprehensive game help window
+        w = tk.Toplevel(self.root)
+        w.title("Help — Car Dodger")
+        w.configure(bg=BG)
+        w.geometry("540x460")
+        center_window(w, 540, 460)
+
+        txt = tk.Text(w, bg=PANEL, fg=FG, bd=0, wrap='word', font=('Arial', 11))
+        txt.pack(fill='both', expand=True, padx=10, pady=10)
+
+        help_text = """
+Car Dodger — Help
+
+Controls:
+  - Left arrow / A : Move left one lane
+  - Right arrow / D: Move right one lane
+  - P              : Pause / Resume during gameplay
+  - L              : Open in-game Leaderboards (pauses the game)
+  - Esc            : Close menus / return to launcher menu
+  - Mouse click    : Use buttons in menus
+
+Gameplay:
+  - Avoid enemy cars. If they collide with you (pixel-perfect or central hitbox), it's game over.
+  - When an enemy passes your car, you get points:
+      * Close pass (near center): +250
+      * Regular pass: +150
+  - Difficulty affects spawn speed, enemy speed, and max enemies.
+
+Score & Leaderboards:
+  - Leaderboards are per-mode and show the best score per player.
+  - Dates shown are YYYY-MM-DD.
+  - To post scores, be logged in before starting the game.
+
+Pause & Resume:
+  - Press P or click the top-right Pause button to pause.
+  - While paused you can Resume or go back to Menu.
+
+Tips:
+  - Stay centered when multiple enemies approach to give yourself lane options.
+  - Use small quick lane swipes to dodge; lane changes are smoothed for nicer feel.
+
+If something crashes, copy the error text and send it to the developer (helps debug quickly).
+"""
+        txt.insert('1.0', help_text.strip())
+        txt.configure(state='disabled')
+
+        btn = DarkButton(w, text="Close", width=10, command=w.destroy)
+        btn.pack(pady=6)
+
 
 if __name__ == "__main__":
     BASE_DIR.mkdir(parents=True, exist_ok=True); ASSETS_DIR.mkdir(parents=True, exist_ok=True)

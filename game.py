@@ -30,6 +30,7 @@ DARK_PANEL = (16, 16, 18)
 WHITE = (255, 255, 255)
 MUTED = (180, 180, 180)
 
+
 def rgba(col, a):
     """Return a 4-tuple (r,g,b,a) safely for pygame when needed."""
     try:
@@ -37,6 +38,7 @@ def rgba(col, a):
     except Exception:
         r, g, b = 0, 0, 0
     return (r, g, b, int(a))
+
 
 def load_image(name, w=None, h=None):
     path = ASSETS / name
@@ -49,7 +51,9 @@ def load_image(name, w=None, h=None):
         img = pg.transform.smoothscale(img, (w, h))
     return img
 
+
 class Button:
+    """Simple, minimal button used for menus (kept subtle and not bulky)."""
     def __init__(self, rect, text, font, base_color=(30,30,34), hover_color=None):
         self.rect = pg.Rect(rect)
         self.text = text
@@ -57,9 +61,9 @@ class Button:
         self.base_color = base_color
         if hover_color is None:
             hover_color = (
-                min(255, base_color[0] + 40),
-                min(255, base_color[1] + 40),
-                min(255, base_color[2] + 60)
+                min(255, base_color[0] + 30),
+                min(255, base_color[1] + 30),
+                min(255, base_color[2] + 30)
             )
         self.hover_color = hover_color
         self.hovering = False
@@ -68,39 +72,91 @@ class Button:
     def update(self, mouse_pos, dt):
         self.hovering = self.rect.collidepoint(mouse_pos)
         if self.hovering:
-            self.pulse = min(1.0, self.pulse + dt * 0.01)
+            self.pulse = min(1.0, self.pulse + dt * 0.008)
         else:
-            self.pulse = max(0.0, self.pulse - dt * 0.02)
+            self.pulse = max(0.0, self.pulse - dt * 0.015)
 
     def draw(self, surf):
-        pulse_scale = 1.0 + 0.03 * (self.pulse)
-        w = int(self.rect.w * pulse_scale)
-        h = int(self.rect.h * pulse_scale)
+        # minimal button (no heavy glow)
+        w = self.rect.w
+        h = self.rect.h
         center = self.rect.center
         draw_rect = pg.Rect(0, 0, w, h)
         draw_rect.center = center
 
         color = (
-            int(self.base_color[0] + (self.hover_color[0] - self.base_color[0]) * (self.pulse * 0.6)),
-            int(self.base_color[1] + (self.hover_color[1] - self.base_color[1]) * (self.pulse * 0.6)),
-            int(self.base_color[2] + (self.hover_color[2] - self.base_color[2]) * (self.pulse * 0.6))
+            int(self.base_color[0] + (self.hover_color[0] - self.base_color[0]) * (self.pulse * 0.5)),
+            int(self.base_color[1] + (self.hover_color[1] - self.base_color[1]) * (self.pulse * 0.5)),
+            int(self.base_color[2] + (self.hover_color[2] - self.base_color[2]) * (self.pulse * 0.5))
         )
 
-        pg.draw.rect(surf, color, draw_rect, border_radius=12)
+        # subtle border for clarity
+        pg.draw.rect(surf, (20,20,20), draw_rect, border_radius=10)
+        pg.draw.rect(surf, color, draw_rect.inflate(-2, -2), border_radius=9)
 
-        if self.hovering and self.pulse > 0.01:
-            glow_w = draw_rect.w + 22
-            glow_h = draw_rect.h + 22
-            glow = pg.Surface((glow_w, glow_h), pg.SRCALPHA)
-            glow_color = rgba(ACCENT, 60 * self.pulse)  # safe 4-tuple
-            pg.draw.rect(glow, glow_color, glow.get_rect(), border_radius=20)
-            surf.blit(glow, (draw_rect.x - 11, draw_rect.y - 11), special_flags=pg.BLEND_RGBA_ADD)
-
-        txt_s = self.font.render(self.text, True, WHITE)
-        surf.blit(txt_s, (center[0] - txt_s.get_width()//2, center[1] - txt_s.get_height()//2))
+        # text: slight shadow + accent on hover (keeps readability)
+        shadow = self.font.render(self.text, True, (0,0,0))
+        txt_color = ACCENT if self.hovering else WHITE
+        txt = self.font.render(self.text, True, txt_color)
+        surf.blit(shadow, (center[0] - shadow.get_width()//2 + 1, center[1] - shadow.get_height()//2 + 1))
+        surf.blit(txt, (center[0] - txt.get_width()//2, center[1] - txt.get_height()//2))
 
     def clicked(self, mouse_pos):
         return self.rect.collidepoint(mouse_pos)
+
+
+class IconButton:
+    """Small icon button. draw_bg=False => only draw icon glyph (no circle/background)."""
+    def __init__(self, rect, kind, base_color=(30,30,34), draw_bg=True):
+        self.rect = pg.Rect(rect)
+        self.kind = kind  # 'pause' | 'help' | 'close'
+        self.base_color = base_color
+        self.draw_bg = draw_bg
+        self.hovering = False
+        self.pulse = 0.0
+
+    def update(self, mouse_pos, dt):
+        self.hovering = self.rect.collidepoint(mouse_pos)
+        if self.hovering:
+            self.pulse = min(1.0, self.pulse + dt * 0.012)
+        else:
+            self.pulse = max(0.0, self.pulse - dt * 0.02)
+
+    def draw(self, surf):
+        cx, cy = self.rect.center
+        r = min(self.rect.w, self.rect.h) // 2 - 2
+
+        # draw background circle only when requested
+        if self.draw_bg:
+            bg_col = (
+                int(self.base_color[0] + (ACCENT[0] - self.base_color[0]) * (self.pulse * 0.5)),
+                int(self.base_color[1] + (ACCENT[1] - self.base_color[1]) * (self.pulse * 0.5)),
+                int(self.base_color[2] + (ACCENT[2] - self.base_color[2]) * (self.pulse * 0.5))
+            ) if self.hovering else (30,30,34)
+            pg.draw.circle(surf, (15,15,15), (cx, cy), r+2)
+            pg.draw.circle(surf, bg_col, (cx, cy), r)
+
+        # icon glyphs (draw always)
+        if self.kind == 'pause':
+            bw = max(2, max(2, self.rect.w//10))
+            ph = int(r * 1.0)
+            x1 = cx - bw - 4; x2 = cx + 4
+            pg.draw.rect(surf, (230,230,230), (x1 - bw//2, cy - ph//2, bw, ph), border_radius=2)
+            pg.draw.rect(surf, (230,230,230), (x2 - bw//2, cy - ph//2, bw, ph), border_radius=2)
+        elif self.kind == 'help':
+            # smaller question mark so it fits without bg
+            qf = pg.font.SysFont('Segoe UI', max(14, r), bold=True)
+            q = qf.render('?', True, (230,230,230))
+            surf.blit(q, (cx - q.get_width()//2, cy - q.get_height()//2))
+        elif self.kind == 'close':
+            thickness = max(2, r//4)
+            # plain X with no surrounding decoration when draw_bg=False
+            pg.draw.line(surf, (230,230,230), (cx - r//2, cy - r//2), (cx + r//2, cy + r//2), thickness)
+            pg.draw.line(surf, (230,230,230), (cx - r//2, cy + r//2), (cx + r//2, cy - r//2), thickness)
+
+    def clicked(self, mouse_pos):
+        return self.rect.colliderect(pg.Rect(mouse_pos[0]-1, mouse_pos[1]-1, 2, 2))
+
 
 
 def run_game(username, user_id, selected_car, difficulty):
@@ -136,7 +192,6 @@ def run_game(username, user_id, selected_car, difficulty):
     # For a 3-lane road image: lane centers at 1/6, 3/6, 5/6 of road width
     LANE_X = []
     for i in range(LANES):
-        # center fraction: (i*2 + 1) / (LANES*2) -> 1/6, 3/6, 5/6 for LANES=3
         frac = (i * 2 + 1) / (LANES * 2)
         center_x = road_left + int(frac * road_w)
         LANE_X.append(center_x - PLAYER_W // 2)
@@ -176,14 +231,26 @@ def run_game(username, user_id, selected_car, difficulty):
                 except ValueError:
                     pass
 
-    # menu buttons
+    # menu buttons (now dynamic so adding Help doesn't overlap)
+    menu_labels = ["Start Game", "Leaderboards", "Help", "Quit"]
     menu_buttons = []
-    btn_w, btn_h = 260, 52
+    btn_w, btn_h = 260, 48
     cx = SCREEN_W // 2
     menu_font = pg.font.SysFont('Segoe UI', 22, bold=True)
-    menu_buttons.append(Button((cx - btn_w//2, 260, btn_w, btn_h), "Start Game", menu_font))
-    menu_buttons.append(Button((cx - btn_w//2, 330, btn_w, btn_h), "Leaderboards", menu_font))
-    menu_buttons.append(Button((cx - btn_w//2, 400, btn_w, btn_h), "Quit", menu_font))
+    for i, lbl in enumerate(menu_labels):
+        y = 260 + i * 64
+        menu_buttons.append(Button((cx - btn_w//2, y, btn_w, btn_h), lbl, menu_font))
+
+    # create in-game small centered icon buttons: pause & help (moved to top-center)
+    icon_w = 36
+    spacing = 12
+    total_w = icon_w * 2 + spacing
+    left_x = SCREEN_W // 2 - total_w // 2
+
+    icon_y = 10
+    pause_btn = IconButton((left_x, icon_y, icon_w, icon_w), 'pause', draw_bg=False)
+    hud_help_btn = IconButton((left_x + icon_w + spacing, icon_y, icon_w, icon_w), 'help', draw_bg=False)
+
 
     def draw_menu(dt):
         mouse_pos = pg.mouse.get_pos()
@@ -201,22 +268,155 @@ def run_game(username, user_id, selected_car, difficulty):
                 screen.blit(glow, (SCREEN_W//2 - glow.get_width()//2 - 1, 108 - 1))
 
         screen.blit(title_s, (SCREEN_W//2 - title_s.get_width()//2, 110))
-        sub = font.render(f"Player: {username}    Mode: {difficulty}", True, MUTED)
+        sub = font.render(f"Player: {username}", True, MUTED)
         screen.blit(sub, (SCREEN_W//2 - sub.get_width()//2, 165))
 
-        # road preview (uses road.png)
-        screen.blit(road, ((SCREEN_W - road.get_width())//2, 200))
+        # no road thumbnail here (removed)
 
         if rnd.random() < 0.08:
             spawn_particle()
         update_particles(dt, screen)
 
+        # draw buttons and handle hover visuals
         for b in menu_buttons:
             b.update(mouse_pos, dt)
             b.draw(screen)
 
         pg.draw.rect(screen, ACCENT, (0, SCREEN_H-6, SCREEN_W, 6))
         pg.display.flip()
+
+    def wrap_text(text, font, max_width):
+        """Return list of wrapped lines for a paragraph `text` using `font`."""
+        words = text.split(' ')
+        lines = []
+        cur = ""
+        for w in words:
+            test = (cur + " " + w).strip()
+            if font.size(test)[0] <= max_width:
+                cur = test
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+        return lines
+
+    def show_help_screen():
+        running_help = True
+
+        # paragraphs (clean, no ugly \n newlines)
+        paras = [
+            "Controls:",
+            "- Left / A  : Move left",
+            "- Right / D : Move right",
+            "- P or Pause: Pause / Resume",
+            "- L         : Leaderboards (in-game)",
+            "- Esc       : Close overlays / Menu",
+
+            "Gameplay:",
+            "Avoid enemy cars. Collisions cause Game Over.",
+            "Points: Close pass +250, Regular pass +150",
+
+            "Tips:",
+            "Stay centered to give yourself escape lanes.",
+            "Use short quick lane changes rather than holding."
+        ]
+
+        # fonts
+        title_f = pg.font.SysFont('Segoe UI', 32, bold=True)
+        body_f  = pg.font.SysFont('Segoe UI', 18)
+
+        box_w = 440
+        inner_w = box_w - 44  # left+right padding
+
+        # wrap text PROPERLY
+        wrapped = []
+        for p in paras:
+            if p.strip() == "":
+                wrapped.append("")
+            else:
+                wrapped.extend(wrap_text(p, body_f, inner_w))
+            wrapped.append("")  # blank line between paragraphs
+
+        # compute dynamic box height
+        # custom spacing
+        line_h = body_f.get_height() -9   # cleaner, tighter paragraphs
+        title_h = title_f.get_height() + 2
+        padding = 24
+
+        content_h = title_h + 10 + (len(wrapped) * line_h)
+        box_h = min(520, content_h + padding * 2)
+
+        bx = SCREEN_W // 2 - box_w // 2
+        by = SCREEN_H // 2 - box_h // 2
+
+        # small close icon at top-right (no background)
+        close_btn = IconButton(
+            (bx + box_w - 36 - 12, by + 12, 36, 36),
+            'close',
+            draw_bg=False
+        )
+
+        # outside-box bottom hint
+        hint_text = body_f.render(
+            "Click close (top-right) or press Esc to close",
+            True,
+            (200, 200, 200)
+        )
+
+        while running_help:
+            dt = clock.tick(FPS)
+            mouse_pos = pg.mouse.get_pos()
+
+            for ev in pg.event.get():
+                if ev.type == pg.QUIT:
+                    return 'quit'
+                if ev.type == pg.KEYDOWN and ev.key in (pg.K_ESCAPE, pg.K_h):
+                    running_help = False
+                if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
+                    mx, my = ev.pos
+                    if close_btn.clicked((mx, my)):
+                        running_help = False
+                    # clicking OUTSIDE box closes
+                    elif not (bx <= mx <= bx + box_w and by <= my <= by + box_h):
+                        running_help = False
+
+            # dim overlay
+            overlay = pg.Surface((SCREEN_W, SCREEN_H), pg.SRCALPHA)
+            overlay.fill((0,0,0,180))
+            screen.blit(overlay, (0, 0))
+
+            # help panel
+            pg.draw.rect(screen, DARK_PANEL, (bx, by, box_w, box_h), border_radius=12)
+            pg.draw.rect(screen, (30,30,30), (bx+8, by+8, box_w-16, box_h-16), border_radius=10)
+
+            # title
+            title_s = title_f.render("Help & Controls", True, ACCENT)
+            screen.blit(title_s, (bx + 22, by + 18))
+
+            # wrapped text
+            hy = by + 18 + title_s.get_height() + 10
+            for ln in wrapped:
+                txt = body_f.render(ln, True, (220,220,220))
+                screen.blit(txt, (bx + 22, hy))
+                hy += line_h
+
+            # draw close icon
+            close_btn.update(mouse_pos, dt)
+            close_btn.draw(screen)
+
+            # bottom hint (OUTSIDE box)
+            screen.blit(
+                hint_text,
+                (SCREEN_W // 2 - hint_text.get_width() // 2, by + box_h + 20)
+            )
+
+            pg.display.flip()
+
+        return 'back'
+
+
 
     def show_leaderboard_screen():
         modes = [("All", None), ("Casual", "Casual"), ("Heroic", "Heroic"), ("Nightmare", "Nightmare")]
@@ -225,11 +425,13 @@ def run_game(username, user_id, selected_car, difficulty):
         btn_w = 110; btn_h = 34; margin = 12
         start_x = (SCREEN_W - (btn_w * len(modes) + margin*(len(modes)-1))) // 2
         btn_rects = [pg.Rect(start_x + i*(btn_w+margin), 70, btn_w, btn_h) for i in range(len(modes))]
-        back_rect = pg.Rect(SCREEN_W - 110, 16, 92, 32)
+        # back button as proper Button (more reliable)
+        back_btn = Button((SCREEN_W - 110, 16, 92, 32), "Back", font)
 
         running_lb = True
         while running_lb:
             dt = clock.tick(FPS)
+            mouse_pos = pg.mouse.get_pos()
             for ev in pg.event.get():
                 if ev.type == pg.QUIT:
                     return 'quit'
@@ -238,6 +440,7 @@ def run_game(username, user_id, selected_car, difficulty):
                         running_lb = False
                 if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                     mx, my = ev.pos
+                    # mode button clicks
                     for i, r in enumerate(btn_rects):
                         if r.collidepoint(mx, my):
                             if i != selected:
@@ -245,13 +448,16 @@ def run_game(username, user_id, selected_car, difficulty):
                                 mode_name = modes[selected][1]
                                 rows = db.top_scores(limit=15, mode=mode_name, distinct=True)
                             break
-                    if back_rect.collidepoint(mx, my):
+                    # back
+                    if back_btn.clicked((mx, my)):
                         running_lb = False
 
+            # draw
             screen.fill((0,0,0))
             title = big_font.render("Leaderboards", True, (250,200,70))
             screen.blit(title, (SCREEN_W//2 - title.get_width()//2, 16))
 
+            # mode buttons (neon when active)
             for i, r in enumerate(btn_rects):
                 is_sel = (i == selected)
                 col = DARK_PANEL if not is_sel else (12,50,56)
@@ -261,9 +467,9 @@ def run_game(username, user_id, selected_car, difficulty):
                 if is_sel:
                     pg.draw.rect(screen, ACCENT, (r.x-2, r.y-2, r.w+4, r.h+4), 2, border_radius=10)
 
-            pg.draw.rect(screen, (40,40,40), back_rect, border_radius=6)
-            btxt = font.render("Back", True, WHITE)
-            screen.blit(btxt, (back_rect.centerx - btxt.get_width()//2, back_rect.centery - btxt.get_height()//2))
+            # back button draw
+            back_btn.update(mouse_pos, dt)
+            back_btn.draw(screen)
 
             y = 130
             if not rows:
@@ -308,7 +514,6 @@ def run_game(username, user_id, selected_car, difficulty):
         for lane in candidate_lanes:
             conflict = any(e['lane'] == lane and e['rect'].y < min_gap for e in enemies)
             if not conflict:
-                # spawn at lane center (use LANE_X which already is left offset for player sprite)
                 x = LANE_X[lane]
                 y = -ENEMY_H - rnd.randint(0, 180)
                 speed = rnd.uniform(spawn_min, spawn_max)
@@ -316,11 +521,21 @@ def run_game(username, user_id, selected_car, difficulty):
                 enemies.append({'rect': rect, 'lane': lane, 'speed': speed, 'passed': False})
                 return
 
-    def draw_hud():
+    def draw_hud(dt):
+        # draw score top-left
         scr = font.render(f"Score: {score}", True, ACCENT)
-        mode = font.render(f"Mode: {difficulty}", True, (200,200,200))
         screen.blit(scr, (10,10))
+
+        # move mode to top-right corner (requested)
+        mode = font.render(f"Mode: {difficulty}", True, (200,200,200))
         screen.blit(mode, (SCREEN_W - mode.get_width() - 10, 10))
+
+        # draw the centered icon buttons (update then draw with dt)
+        mouse_pos = pg.mouse.get_pos()
+        pause_btn.update(mouse_pos, dt)
+        hud_help_btn.update(mouse_pos, dt)
+        pause_btn.draw(screen)
+        hud_help_btn.draw(screen)
 
     # main menu loop
     in_menu = True
@@ -332,16 +547,22 @@ def run_game(username, user_id, selected_car, difficulty):
                 return
             if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                 mpos = pg.mouse.get_pos()
-                if menu_buttons[0].clicked(mpos):
-                    in_menu = False
-                elif menu_buttons[1].clicked(mpos):
-                    res = show_leaderboard_screen()
-                    if res == 'quit':
-                        pg.quit()
-                        return
-                elif menu_buttons[2].clicked(mpos):
-                    pg.quit()
-                    return
+                for b in menu_buttons:
+                    if b.clicked(mpos):
+                        lbl = b.text
+                        if lbl == "Start Game":
+                            in_menu = False
+                            break
+                        elif lbl == "Leaderboards":
+                            res = show_leaderboard_screen()
+                            if res == 'quit':
+                                pg.quit()
+                                return
+                        elif lbl == "Help":
+                            show_help_screen()
+                        elif lbl == "Quit":
+                            pg.quit()
+                            return
         draw_menu(dt)
 
     # gameplay loop
@@ -367,16 +588,79 @@ def run_game(username, user_id, selected_car, difficulty):
                     paused = True
                     res = show_leaderboard_screen()
                     paused = paused_before
+            if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
+                mx, my = ev.pos
+                # pause icon click
+                if pause_btn.clicked((mx, my)):
+                    paused = not paused
+                if hud_help_btn.clicked((mx, my)):
+                    paused_before = paused
+                    paused = True
+                    show_help_screen()
+                    paused = paused_before
 
         if paused:
-            screen.fill((6,6,6))
-            pause_txt = big_font.render("PAUSED", True, (230,230,230))
-            hint = font.render("Press P to resume. Press Esc to quit.", True, (200,200,200))
-            screen.blit(pause_txt, (SCREEN_W//2 - pause_txt.get_width()//2, SCREEN_H//2 - 40))
-            screen.blit(hint, (SCREEN_W//2 - hint.get_width()//2, SCREEN_H//2 + 10))
-            pg.display.flip()
+            # pause loop - separate event handling so clicks are reliable
+            while paused:
+                dt_p = clock.tick(FPS)
+                mouse_pos = pg.mouse.get_pos()
+                # overlay
+                overlay = pg.Surface((SCREEN_W, SCREEN_H), pg.SRCALPHA)
+                overlay.fill((0,0,0,200))
+                screen.blit(overlay, (0,0))
+
+                pause_txt = big_font.render("PAUSED", True, (230,230,230))
+                screen.blit(pause_txt, (SCREEN_W//2 - pause_txt.get_width()//2, SCREEN_H//2 - 80))
+
+                bw = 180; bh = 48
+                resume_b = Button((SCREEN_W//2 - bw//2, SCREEN_H//2 - 10, bw, bh), "Resume", font)
+                menu_b = Button((SCREEN_W//2 - bw//2, SCREEN_H//2 + 50, bw, bh), "Menu", font)
+
+                resume_b.update(mouse_pos, dt_p); menu_b.update(mouse_pos, dt_p)
+                resume_b.draw(screen); menu_b.draw(screen)
+
+                # also draw small centered icons so player sees consistent UI while paused
+                pause_btn.update(mouse_pos, dt_p); hud_help_btn.update(mouse_pos, dt_p)
+                pause_btn.draw(screen); hud_help_btn.draw(screen)
+
+                pg.display.flip()
+
+                for ev2 in pg.event.get():
+                    if ev2.type == pg.QUIT:
+                        pg.quit()
+                        return
+                    if ev2.type == pg.KEYDOWN:
+                        if ev2.key == pg.K_p:
+                            paused = False
+                            break
+                        if ev2.key == pg.K_ESCAPE:
+                            # treat ESC as back to menu
+                            paused = False
+                            running = False
+                            break
+                    if ev2.type == pg.MOUSEBUTTONDOWN and ev2.button == 1:
+                        mx, my = ev2.pos
+                        if resume_b.clicked((mx, my)):
+                            paused = False
+                            break
+                        if menu_b.clicked((mx, my)):
+                            paused = False
+                            running = False
+                            break
+                        # clicks on the centered icon buttons (help/pause) should still work
+                        if hud_help_btn.clicked((mx, my)):
+                            # open help overlay (keeps paused state after closing)
+                            show_help_screen()
+                        if pause_btn.clicked((mx, my)):
+                            paused = False
+                            break
+
+                # when loop continues it'll re-evaluate paused
+            # end paused loop
+            # continue main loop to prevent double-processing
             continue
 
+        # regular update / spawn / physics
         now = pg.time.get_ticks()
         if now - last_spawn > spawn_ms:
             spawn()
@@ -448,12 +732,13 @@ def run_game(username, user_id, selected_car, difficulty):
             screen.blit(road, (rx, ry))
             ry += road_h
 
-        # NOTE: removed programmatic lane divider drawing — road.png defines lanes visually
-
+        # draw enemies & player
         for e in enemies:
             screen.blit(enemy_img, (e['rect'].x, e['rect'].y))
         screen.blit(player_img, (player_rect.x, player_rect.y))
-        draw_hud()
+
+        # draw HUD (score + pause/help buttons)
+        draw_hud(dt)
         pg.display.flip()
 
     # Game over UI
@@ -466,19 +751,15 @@ def run_game(username, user_id, selected_car, difficulty):
 
         while show:
             dt = clock.tick(FPS)
+            mouse_pos = pg.mouse.get_pos()
             for ev in pg.event.get():
-                if ev.type == pg.QUIT:
-                    return "quit"
-                if ev.type == pg.KEYDOWN and ev.key == pg.K_ESCAPE:
-                    return "menu"
+                if ev.type == pg.QUIT: return "quit"
+                if ev.type == pg.KEYDOWN and ev.key == pg.K_ESCAPE: return "menu"
                 if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                     mpos = pg.mouse.get_pos()
-                    if b_restart.clicked(mpos):
-                        return "restart"
-                    if b_view.clicked(mpos):
-                        return "leaderboard"
-                    if b_menu.clicked(mpos):
-                        return "menu"
+                    if b_restart.clicked(mpos): return "restart"
+                    if b_view.clicked(mpos): return "leaderboard"
+                    if b_menu.clicked(mpos): return "menu"
 
             screen.fill((6,6,6))
             go = big_font.render("GAME OVER", True, (255,80,80))
