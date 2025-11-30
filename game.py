@@ -1,4 +1,5 @@
 # game.py
+
 import pygame as pg
 from pathlib import Path
 import random as rnd
@@ -31,7 +32,6 @@ MUTED = (180, 180, 180)
 
 def rgba(col, a):
     """Return a 4-tuple (r,g,b,a) safely for pygame when needed."""
-    # ensure col has 3 ints
     try:
         r, g, b = int(col[0]), int(col[1]), int(col[2])
     except Exception:
@@ -102,13 +102,14 @@ class Button:
     def clicked(self, mouse_pos):
         return self.rect.collidepoint(mouse_pos)
 
+
 def run_game(username, user_id, selected_car, difficulty):
     pg.init()
     screen = pg.display.set_mode((SCREEN_W, SCREEN_H))
     pg.display.set_caption('Car Dodger')
     clock = pg.time.Clock()
 
-    # Load assets
+    # Load assets (road.png must be a 3-lane road image)
     road = load_image("road.png", SCREEN_W, SCREEN_H//2)
     grass = load_image("grass.png", 80, SCREEN_H//3)
     player1 = load_image("player1.png", PLAYER_W, PLAYER_H)
@@ -127,15 +128,18 @@ def run_game(username, user_id, selected_car, difficulty):
     except Exception:
         enemy_mask = None
 
-    # lane geometry
+    # lane geometry: compute lane centers from the road image (3 lanes)
     road_w = road.get_width()
+    road_h = road.get_height()
     road_left = (SCREEN_W - road_w) // 2
-    lane_w = road_w // 4
-    LANE_X = [
-        road_left + 1*lane_w - PLAYER_W//2,
-        road_left + 2*lane_w - PLAYER_W//2,
-        road_left + 3*lane_w - PLAYER_W//2
-    ]
+
+    # For a 3-lane road image: lane centers at 1/6, 3/6, 5/6 of road width
+    LANE_X = []
+    for i in range(LANES):
+        # center fraction: (i*2 + 1) / (LANES*2) -> 1/6, 3/6, 5/6 for LANES=3
+        frac = (i * 2 + 1) / (LANES * 2)
+        center_x = road_left + int(frac * road_w)
+        LANE_X.append(center_x - PLAYER_W // 2)
 
     cfg = DIFF.get(difficulty, DIFF['Casual'])
     spawn_ms_base = cfg['spawn_ms']
@@ -200,6 +204,7 @@ def run_game(username, user_id, selected_car, difficulty):
         sub = font.render(f"Player: {username}    Mode: {difficulty}", True, MUTED)
         screen.blit(sub, (SCREEN_W//2 - sub.get_width()//2, 165))
 
+        # road preview (uses road.png)
         screen.blit(road, ((SCREEN_W - road.get_width())//2, 200))
 
         if rnd.random() < 0.08:
@@ -287,7 +292,6 @@ def run_game(username, user_id, selected_car, difficulty):
     last_spawn = pg.time.get_ticks()
     spawn_ms = spawn_ms_base
     offset = 0
-    road_h = road.get_height()
 
     cur_lane = 1
     target_x = LANE_X[cur_lane]
@@ -304,6 +308,7 @@ def run_game(username, user_id, selected_car, difficulty):
         for lane in candidate_lanes:
             conflict = any(e['lane'] == lane and e['rect'].y < min_gap for e in enemies)
             if not conflict:
+                # spawn at lane center (use LANE_X which already is left offset for player sprite)
                 x = LANE_X[lane]
                 y = -ENEMY_H - rnd.randint(0, 180)
                 speed = rnd.uniform(spawn_min, spawn_max)
@@ -428,6 +433,7 @@ def run_game(username, user_id, selected_car, difficulty):
             else:
                 player_rect.x = max(target_x, player_rect.x - lane_change_speed)
 
+        # scrolling background uses road.png (no programmatic lane creation)
         offset = (offset + scroll) % max(1, road_h)
         screen.fill(DARK_BG)
         gx = -offset
@@ -442,10 +448,7 @@ def run_game(username, user_id, selected_car, difficulty):
             screen.blit(road, (rx, ry))
             ry += road_h
 
-        for i in range(1, 4):
-            x = rx + i*(road.get_width()//4)
-            for y in range(0, SCREEN_H, 40):
-                pg.draw.line(screen, (180,180,180), (x, y+10), (x, y+20), 3)
+        # NOTE: removed programmatic lane divider drawing — road.png defines lanes visually
 
         for e in enemies:
             screen.blit(enemy_img, (e['rect'].x, e['rect'].y))
