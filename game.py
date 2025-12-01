@@ -1,14 +1,16 @@
-# game.py
-
 import pygame as pg
 from pathlib import Path
 import random as rnd
 import db
 from db import save_score
 import time
+import math
+import json
 
+# --- Paths & constants ---
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS = BASE_DIR / "assets"
+CFG_FILE = BASE_DIR / "config.json"
 
 FPS = 60
 SCREEN_W, SCREEN_H = 480, 720
@@ -18,28 +20,50 @@ ENEMY_W, ENEMY_H = 80, 140
 CLOSE_THRESH = 80
 
 DIFF = {
-    'Casual':    {'min': 3.0,  'max': 5.0,  'spawn_ms': 1200, 'scroll': 3, 'max_enemies': 5},
-    'Heroic':    {'min': 5.0,  'max': 8.0,  'spawn_ms': 900,  'scroll': 5, 'max_enemies': 7},
+    'Casual':    {'min': 4.0,  'max': 6.0,  'spawn_ms': 1200, 'scroll': 4, 'max_enemies': 5},
+    'Heroic':    {'min': 6.0,  'max': 8.0,  'spawn_ms': 900,  'scroll': 5, 'max_enemies': 7},
     'Nightmare': {'min': 8.0,  'max': 12.0, 'spawn_ms': 550, 'scroll': 8, 'max_enemies': 10}
 }
 
-# Colors
+# Theme colors
 ACCENT = (0, 192, 214)
 DARK_BG = (8, 8, 10)
 DARK_PANEL = (16, 16, 18)
 WHITE = (255, 255, 255)
 MUTED = (180, 180, 180)
 
+# Default config used when file missing
+DEFAULT_CFG = {
+    "music_on": True,
+    "music_volume": 0.6,
+    "selected_car": "player1.png",
+    "difficulty": "Casual"
+}
 
+# --- Config helpers ---
+def load_config():
+    try:
+        if CFG_FILE.exists():
+            return json.loads(CFG_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        pass
+    return DEFAULT_CFG.copy()
+
+def save_config(cfg):
+    try:
+        CFG_FILE.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+    except Exception:
+        pass
+
+# Safe color helper for alpha
 def rgba(col, a):
-    """Return a 4-tuple (r,g,b,a) safely for pygame when needed."""
     try:
         r, g, b = int(col[0]), int(col[1]), int(col[2])
     except Exception:
         r, g, b = 0, 0, 0
     return (r, g, b, int(a))
 
-
+# Safe image loader: returns Surface (or placeholder surface) scaled if requested
 def load_image(name, w=None, h=None):
     path = ASSETS / name
     if not path.exists():
@@ -51,9 +75,9 @@ def load_image(name, w=None, h=None):
         img = pg.transform.smoothscale(img, (w, h))
     return img
 
-
+# --- UI widgets (minimal) ---
 class Button:
-    """Simple, minimal button used for menus (kept subtle and not bulky)."""
+    """Simple rectangular button with hover pulse."""
     def __init__(self, rect, text, font, base_color=(30,30,34), hover_color=None):
         self.rect = pg.Rect(rect)
         self.text = text
@@ -77,12 +101,9 @@ class Button:
             self.pulse = max(0.0, self.pulse - dt * 0.015)
 
     def draw(self, surf):
-        # minimal button (no heavy glow)
-        w = self.rect.w
-        h = self.rect.h
+        w, h = self.rect.w, self.rect.h
         center = self.rect.center
-        draw_rect = pg.Rect(0, 0, w, h)
-        draw_rect.center = center
+        draw_rect = pg.Rect(0, 0, w, h); draw_rect.center = center
 
         color = (
             int(self.base_color[0] + (self.hover_color[0] - self.base_color[0]) * (self.pulse * 0.5)),
@@ -90,11 +111,9 @@ class Button:
             int(self.base_color[2] + (self.hover_color[2] - self.base_color[2]) * (self.pulse * 0.5))
         )
 
-        # subtle border for clarity
         pg.draw.rect(surf, (20,20,20), draw_rect, border_radius=10)
         pg.draw.rect(surf, color, draw_rect.inflate(-2, -2), border_radius=9)
 
-        # text: slight shadow + accent on hover (keeps readability)
         shadow = self.font.render(self.text, True, (0,0,0))
         txt_color = ACCENT if self.hovering else WHITE
         txt = self.font.render(self.text, True, txt_color)
@@ -104,12 +123,11 @@ class Button:
     def clicked(self, mouse_pos):
         return self.rect.collidepoint(mouse_pos)
 
-
 class IconButton:
-    """Small icon button. draw_bg=False => only draw icon glyph (no circle/background)."""
+    """Small centered icon glyph used for pause/close buttons."""
     def __init__(self, rect, kind, base_color=(30,30,34), draw_bg=True):
         self.rect = pg.Rect(rect)
-        self.kind = kind  # 'pause' | 'help' | 'close'
+        self.kind = kind
         self.base_color = base_color
         self.draw_bg = draw_bg
         self.hovering = False
@@ -124,9 +142,8 @@ class IconButton:
 
     def draw(self, surf):
         cx, cy = self.rect.center
-        r = min(self.rect.w, self.rect.h) // 2 - 2
+        r = max(6, min(self.rect.w, self.rect.h) // 2 - 2)
 
-        # draw background circle only when requested
         if self.draw_bg:
             bg_col = (
                 int(self.base_color[0] + (ACCENT[0] - self.base_color[0]) * (self.pulse * 0.5)),
@@ -136,45 +153,75 @@ class IconButton:
             pg.draw.circle(surf, (15,15,15), (cx, cy), r+2)
             pg.draw.circle(surf, bg_col, (cx, cy), r)
 
-        # icon glyphs (draw always)
         if self.kind == 'pause':
-            bw = max(2, max(2, self.rect.w//10))
+            bw = max(2, r//3)
             ph = int(r * 1.0)
             x1 = cx - bw - 4; x2 = cx + 4
             pg.draw.rect(surf, (230,230,230), (x1 - bw//2, cy - ph//2, bw, ph), border_radius=2)
             pg.draw.rect(surf, (230,230,230), (x2 - bw//2, cy - ph//2, bw, ph), border_radius=2)
-        elif self.kind == 'help':
-            # smaller question mark so it fits without bg
-            qf = pg.font.SysFont('Segoe UI', max(14, r), bold=True)
-            q = qf.render('?', True, (230,230,230))
-            surf.blit(q, (cx - q.get_width()//2, cy - q.get_height()//2))
         elif self.kind == 'close':
-            thickness = max(2, r//4)
-            # plain X with no surrounding decoration when draw_bg=False
+            thickness = max(2, r//3)
             pg.draw.line(surf, (230,230,230), (cx - r//2, cy - r//2), (cx + r//2, cy + r//2), thickness)
             pg.draw.line(surf, (230,230,230), (cx - r//2, cy + r//2), (cx + r//2, cy - r//2), thickness)
 
     def clicked(self, mouse_pos):
         return self.rect.colliderect(pg.Rect(mouse_pos[0]-1, mouse_pos[1]-1, 2, 2))
 
-
-
+# --- Main game function (entry point) ---
 def run_game(username, user_id, selected_car, difficulty):
     pg.init()
+    cfg = load_config()
+    music_on = bool(cfg.get("music_on", True))
+    music_volume = float(cfg.get("music_volume", 0.6))
+
+    # Try to initialize mixer; if it fails we continue without audio.
+    mixer_ok = False
+    try:
+        pg.mixer.init()
+        mixer_ok = True
+    except Exception:
+        mixer_ok = False
+
+    # Load and play music if available
+    music_loaded = False
+    if mixer_ok:
+        for candidate in ("bgmusicgame.mp3", "bg_game.mp3", "bgmusic.mp3", "menu_music.mp3"):
+            mpath = ASSETS / candidate
+            if mpath.exists():
+                try:
+                    pg.mixer.music.load(str(mpath))
+                    pg.mixer.music.set_volume(music_volume)
+                    music_loaded = True
+                    if music_on:
+                        try:
+                            pg.mixer.music.play(-1)
+                        except Exception:
+                            pass
+                    break
+                except Exception:
+                    music_loaded = False
+
     screen = pg.display.set_mode((SCREEN_W, SCREEN_H))
     pg.display.set_caption('Car Dodger')
     clock = pg.time.Clock()
 
-    # Load assets (road.png must be a 3-lane road image)
+    # Load assets (use placeholders when missing)
     road = load_image("road.png", SCREEN_W, SCREEN_H//2)
     grass = load_image("grass.png", 80, SCREEN_H//3)
-    player1 = load_image("player1.png", PLAYER_W, PLAYER_H)
-    player2 = load_image("player2.png", PLAYER_W, PLAYER_H)
+    player_imgs = {
+        'player1.png': load_image("player1.png", PLAYER_W, PLAYER_H),
+        'player2.png': load_image("player2.png", PLAYER_W, PLAYER_H),
+        'player3.png': load_image("player3.png", PLAYER_W, PLAYER_H),
+        'player4.png': load_image("player4.png", PLAYER_W, PLAYER_H),
+        'player5.png': load_image("player5.png", PLAYER_W, PLAYER_H)
+    }
     enemy_img = load_image("enemy.png", ENEMY_W, ENEMY_H)
 
-    player_img = player1 if Path(selected_car).name == "player1.png" else player2
+    # Select player image, fallback to player1 if unknown
+    sel_name = Path(selected_car).name if selected_car else 'player1.png'
+    player_img = player_imgs.get(sel_name) or player_imgs.get('player1.png')
 
-    # masks for pixel-perfect collision (safe)
+    # Build masks when possible
     try:
         player_mask = pg.mask.from_surface(player_img)
     except Exception:
@@ -184,30 +231,29 @@ def run_game(username, user_id, selected_car, difficulty):
     except Exception:
         enemy_mask = None
 
-    # lane geometry: compute lane centers from the road image (3 lanes)
+    # Lane layout
     road_w = road.get_width()
     road_h = road.get_height()
     road_left = (SCREEN_W - road_w) // 2
-
-    # For a 3-lane road image: lane centers at 1/6, 3/6, 5/6 of road width
     LANE_X = []
     for i in range(LANES):
         frac = (i * 2 + 1) / (LANES * 2)
         center_x = road_left + int(frac * road_w)
         LANE_X.append(center_x - PLAYER_W // 2)
 
-    cfg = DIFF.get(difficulty, DIFF['Casual'])
-    spawn_ms_base = cfg['spawn_ms']
-    spawn_min = cfg['min']
-    spawn_max = cfg['max']
-    scroll = cfg['scroll']
-    MAX_ENEMIES = cfg['max_enemies']
+    cfg_diff = DIFF.get(difficulty, DIFF['Casual'])
+    spawn_ms_base = cfg_diff['spawn_ms']
+    spawn_min = cfg_diff['min']
+    spawn_max = cfg_diff['max']
+    base_scroll = cfg_diff['scroll']
+    MAX_ENEMIES = cfg_diff['max_enemies']
 
     font = pg.font.SysFont('Segoe UI', 18)
     big_font = pg.font.SysFont('Segoe UI', 40, bold=True)
 
-    # particles
     particles = []
+    floating = []
+
     def spawn_particle():
         x = rnd.randint(10, SCREEN_W-10)
         y = -10
@@ -217,21 +263,34 @@ def run_game(username, user_id, selected_car, difficulty):
         life = rnd.uniform(2.0, 4.0)
         particles.append([x, y, vx, vy, size, life])
 
-    def update_particles(dt, surf):
+    def spawn_popup(text, x, y):
+        f = pg.font.SysFont('Segoe UI', 20, bold=True)
+        floating.append({'txt': text, 'x': x, 'y': y, 'vy': -0.3, 'life': 900, 'alpha': 255, 'font': f})
+
+    def update_particles_and_floating(dt, surf, scroll_effect=0.0):
         for p in particles[:]:
-            p[1] += p[4] * p[3]
-            p[0] += p[2] * dt * 0.5
+            p[1] += p[4] * (p[3] + scroll_effect)
+            p[0] += p[2] * dt * 0.05
             p[5] -= dt * 0.001
             alpha = max(0, min(180, int(180 * (p[5] / 4.0))))
             color = rgba(ACCENT, alpha)
             pg.draw.circle(surf, color, (int(p[0]), int(p[1])), p[4])
             if p[1] > SCREEN_H + 20 or p[5] <= 0:
-                try:
-                    particles.remove(p)
-                except ValueError:
-                    pass
+                try: particles.remove(p)
+                except ValueError: pass
 
-    # menu buttons (now dynamic so adding Help doesn't overlap)
+        for f in floating[:]:
+            f['y'] += f['vy'] * (dt * 0.06)
+            f['life'] -= dt
+            if f['life'] < 0:
+                try: floating.remove(f)
+                except ValueError: pass
+                continue
+            surf_txt = f['font'].render(f['txt'], True, ACCENT)
+            surf.blit(pg.transform.smoothscale(surf_txt, surf_txt.get_size()), (f['x'] - surf_txt.get_width()//2 + 1, int(f['y']) + 1))
+            surf.blit(surf_txt, (f['x'] - surf_txt.get_width()//2, int(f['y'])))
+
+    # Menu buttons
     menu_labels = ["Start Game", "Leaderboards", "Help", "Quit"]
     menu_buttons = []
     btn_w, btn_h = 260, 48
@@ -241,21 +300,14 @@ def run_game(username, user_id, selected_car, difficulty):
         y = 260 + i * 64
         menu_buttons.append(Button((cx - btn_w//2, y, btn_w, btn_h), lbl, menu_font))
 
-    # create in-game small centered icon buttons: pause & help (moved to top-center)
     icon_w = 36
-    spacing = 12
-    total_w = icon_w * 2 + spacing
-    left_x = SCREEN_W // 2 - total_w // 2
-
+    left_x = SCREEN_W // 2 - icon_w // 2
     icon_y = 10
     pause_btn = IconButton((left_x, icon_y, icon_w, icon_w), 'pause', draw_bg=False)
-    hud_help_btn = IconButton((left_x + icon_w + spacing, icon_y, icon_w, icon_w), 'help', draw_bg=False)
-
 
     def draw_menu(dt):
         mouse_pos = pg.mouse.get_pos()
         screen.fill(DARK_BG)
-
         title_s = big_font.render("CAR DODGER", True, (240,240,240))
         glow = big_font.render("CAR DODGER", True, ACCENT)
         for i in range(3):
@@ -271,13 +323,10 @@ def run_game(username, user_id, selected_car, difficulty):
         sub = font.render(f"Player: {username}", True, MUTED)
         screen.blit(sub, (SCREEN_W//2 - sub.get_width()//2, 165))
 
-        # no road thumbnail here (removed)
-
         if rnd.random() < 0.08:
             spawn_particle()
-        update_particles(dt, screen)
+        update_particles_and_floating(dt, screen, scroll_effect=0.0)
 
-        # draw buttons and handle hover visuals
         for b in menu_buttons:
             b.update(mouse_pos, dt)
             b.draw(screen)
@@ -286,7 +335,6 @@ def run_game(username, user_id, selected_car, difficulty):
         pg.display.flip()
 
     def wrap_text(text, font, max_width):
-        """Return list of wrapped lines for a paragraph `text` using `font`."""
         words = text.split(' ')
         lines = []
         cur = ""
@@ -295,128 +343,88 @@ def run_game(username, user_id, selected_car, difficulty):
             if font.size(test)[0] <= max_width:
                 cur = test
             else:
-                if cur:
-                    lines.append(cur)
+                if cur: lines.append(cur)
                 cur = w
-        if cur:
-            lines.append(cur)
+        if cur: lines.append(cur)
         return lines
 
     def show_help_screen():
+        # Simple overlay help screen
         running_help = True
-
-        # paragraphs (clean, no ugly \n newlines)
-        paras = [
-            "Controls:",
-            "- Left / A  : Move left",
-            "- Right / D : Move right",
-            "- P or Pause: Pause / Resume",
-            "- L         : Leaderboards (in-game)",
-            "- Esc       : Close overlays / Menu",
-
-            "Gameplay:",
-            "Avoid enemy cars. Collisions cause Game Over.",
-            "Points: Close pass +250, Regular pass +150",
-
-            "Tips:",
-            "Stay centered to give yourself escape lanes.",
-            "Use short quick lane changes rather than holding."
+        sections = [
+            ("Controls:", ["- Left / A  : Move left", "- Right / D : Move right", "- P or Pause: Pause / Resume", "- L         : Leaderboards (in-game)", "- Esc       : Close overlays / Menu",]),
+            ("Gameplay:", ["Avoid enemy cars. Collisions cause Game Over.", "Points: Close pass +250, Regular pass +150",]),
+            ("Tips:", ["Stay centered to give yourself escape lanes.", "Use short quick lane changes rather than holding.",])
         ]
 
-        # fonts
         title_f = pg.font.SysFont('Segoe UI', 32, bold=True)
-        body_f  = pg.font.SysFont('Segoe UI', 18)
+        body_f = pg.font.SysFont('Segoe UI', 18)
 
         box_w = 440
-        inner_w = box_w - 44  # left+right padding
+        inner_w = box_w - 44
 
-        # wrap text PROPERLY
         wrapped = []
-        for p in paras:
-            if p.strip() == "":
-                wrapped.append("")
-            else:
-                wrapped.extend(wrap_text(p, body_f, inner_w))
-            wrapped.append("")  # blank line between paragraphs
+        for hdr, lines in sections:
+            wrapped.append((True, hdr))
+            for ln in lines:
+                for sub_ln in wrap_text(ln, body_f, inner_w):
+                    wrapped.append((False, sub_ln))
+            wrapped.append((False, ""))
 
-        # compute dynamic box height
-        # custom spacing
-        line_h = body_f.get_height() -9   # cleaner, tighter paragraphs
-        title_h = title_f.get_height() + 2
-        padding = 24
-
-        content_h = title_h + 10 + (len(wrapped) * line_h)
+        line_h = body_f.get_linesize()
+        title_h = title_f.get_linesize()
+        padding = 22
+        content_h = title_h + 10 + len(wrapped) * line_h
         box_h = min(520, content_h + padding * 2)
-
         bx = SCREEN_W // 2 - box_w // 2
         by = SCREEN_H // 2 - box_h // 2
 
-        # small close icon at top-right (no background)
-        close_btn = IconButton(
-            (bx + box_w - 36 - 12, by + 12, 36, 36),
-            'close',
-            draw_bg=False
-        )
-
-        # outside-box bottom hint
-        hint_text = body_f.render(
-            "Click close (top-right) or press Esc to close",
-            True,
-            (200, 200, 200)
-        )
+        close_btn = IconButton((bx + box_w - 36 - 12, by + 12, 36, 36), 'close', draw_bg=False)
+        hint_text = body_f.render("Press Esc or Close to dismiss", True, (200,200,200))
 
         while running_help:
             dt = clock.tick(FPS)
             mouse_pos = pg.mouse.get_pos()
-
             for ev in pg.event.get():
                 if ev.type == pg.QUIT:
                     return 'quit'
-                if ev.type == pg.KEYDOWN and ev.key in (pg.K_ESCAPE, pg.K_h):
+                if ev.type == pg.KEYDOWN and ev.key in (pg.K_ESCAPE, pg.K_RETURN):
                     running_help = False
                 if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                     mx, my = ev.pos
                     if close_btn.clicked((mx, my)):
                         running_help = False
-                    # clicking OUTSIDE box closes
                     elif not (bx <= mx <= bx + box_w and by <= my <= by + box_h):
                         running_help = False
 
-            # dim overlay
             overlay = pg.Surface((SCREEN_W, SCREEN_H), pg.SRCALPHA)
-            overlay.fill((0,0,0,180))
+            overlay.fill((0,0,0,160))
             screen.blit(overlay, (0, 0))
 
-            # help panel
             pg.draw.rect(screen, DARK_PANEL, (bx, by, box_w, box_h), border_radius=12)
             pg.draw.rect(screen, (30,30,30), (bx+8, by+8, box_w-16, box_h-16), border_radius=10)
 
-            # title
             title_s = title_f.render("Help & Controls", True, ACCENT)
             screen.blit(title_s, (bx + 22, by + 18))
 
-            # wrapped text
             hy = by + 18 + title_s.get_height() + 10
-            for ln in wrapped:
-                txt = body_f.render(ln, True, (220,220,220))
-                screen.blit(txt, (bx + 22, hy))
-                hy += line_h
+            for is_header, txt in wrapped:
+                if is_header:
+                    hdr_s = body_f.render(txt, True, (220,220,220))
+                    screen.blit(hdr_s, (bx + 22, hy))
+                    hy += line_h
+                else:
+                    ln_s = body_f.render(txt, True, (200,200,200))
+                    screen.blit(ln_s, (bx + 28, hy))
+                    hy += line_h
 
-            # draw close icon
             close_btn.update(mouse_pos, dt)
             close_btn.draw(screen)
 
-            # bottom hint (OUTSIDE box)
-            screen.blit(
-                hint_text,
-                (SCREEN_W // 2 - hint_text.get_width() // 2, by + box_h + 20)
-            )
-
+            screen.blit(hint_text, (SCREEN_W // 2 - hint_text.get_width() // 2, by + box_h + 14))
             pg.display.flip()
 
         return 'back'
-
-
 
     def show_leaderboard_screen():
         modes = [("All", None), ("Casual", "Casual"), ("Heroic", "Heroic"), ("Nightmare", "Nightmare")]
@@ -425,7 +433,6 @@ def run_game(username, user_id, selected_car, difficulty):
         btn_w = 110; btn_h = 34; margin = 12
         start_x = (SCREEN_W - (btn_w * len(modes) + margin*(len(modes)-1))) // 2
         btn_rects = [pg.Rect(start_x + i*(btn_w+margin), 70, btn_w, btn_h) for i in range(len(modes))]
-        # back button as proper Button (more reliable)
         back_btn = Button((SCREEN_W - 110, 16, 92, 32), "Back", font)
 
         running_lb = True
@@ -436,11 +443,10 @@ def run_game(username, user_id, selected_car, difficulty):
                 if ev.type == pg.QUIT:
                     return 'quit'
                 if ev.type == pg.KEYDOWN:
-                    if ev.key == pg.K_ESCAPE:
+                    if ev.key == pg.K_ESCAPE or ev.key == pg.K_RETURN:
                         running_lb = False
                 if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                     mx, my = ev.pos
-                    # mode button clicks
                     for i, r in enumerate(btn_rects):
                         if r.collidepoint(mx, my):
                             if i != selected:
@@ -448,16 +454,13 @@ def run_game(username, user_id, selected_car, difficulty):
                                 mode_name = modes[selected][1]
                                 rows = db.top_scores(limit=15, mode=mode_name, distinct=True)
                             break
-                    # back
                     if back_btn.clicked((mx, my)):
                         running_lb = False
 
-            # draw
             screen.fill((0,0,0))
             title = big_font.render("Leaderboards", True, (250,200,70))
             screen.blit(title, (SCREEN_W//2 - title.get_width()//2, 16))
 
-            # mode buttons (neon when active)
             for i, r in enumerate(btn_rects):
                 is_sel = (i == selected)
                 col = DARK_PANEL if not is_sel else (12,50,56)
@@ -467,7 +470,6 @@ def run_game(username, user_id, selected_car, difficulty):
                 if is_sel:
                     pg.draw.rect(screen, ACCENT, (r.x-2, r.y-2, r.w+4, r.h+4), 2, border_radius=10)
 
-            # back button draw
             back_btn.update(mouse_pos, dt)
             back_btn.draw(screen)
 
@@ -483,26 +485,27 @@ def run_game(username, user_id, selected_car, difficulty):
                     uname, sc, mode, created = r
                     date_only = (created or '')[:10]
                     mode_text = mode if mode else '-'
-                    line_text = f"{rank:<6}{uname:<18}{sc:>8}{mode_text:>10}{date_only:>12}"
+                    uname_disp = uname if len(uname) <= 16 else uname[:13] + '...'
+                    line_text = f"{rank:<6}{uname_disp:<18}{sc:>8}{mode_text:>10}{date_only:>12}"
                     line = font.render(line_text, True, (220,220,220))
                     screen.blit(line, (28, y)); y += 26; rank += 1
 
-            hint = font.render("Esc to close | Click mode buttons to switch", True, (150,150,150))
+            hint = font.render("Esc/Enter to close | Click mode buttons to switch", True, (150,150,150))
             screen.blit(hint, (SCREEN_W//2 - hint.get_width()//2, SCREEN_H - 40))
             pg.display.flip()
         return 'back'
 
-    # gameplay variables
+    # Gameplay state
     score = 0
     enemies = []
     last_spawn = pg.time.get_ticks()
     spawn_ms = spawn_ms_base
-    offset = 0
+    offset = 0.0
 
     cur_lane = 1
     target_x = LANE_X[cur_lane]
     player_rect = pg.Rect(target_x, SCREEN_H - PLAYER_H - 20, PLAYER_W, PLAYER_H)
-    lane_change_speed = 10.0
+    lane_change_speed = 12.0
     paused = False
 
     def spawn():
@@ -522,50 +525,52 @@ def run_game(username, user_id, selected_car, difficulty):
                 return
 
     def draw_hud(dt):
-        # draw score top-left
         scr = font.render(f"Score: {score}", True, ACCENT)
         screen.blit(scr, (10,10))
-
-        # move mode to top-right corner (requested)
         mode = font.render(f"Mode: {difficulty}", True, (200,200,200))
         screen.blit(mode, (SCREEN_W - mode.get_width() - 10, 10))
-
-        # draw the centered icon buttons (update then draw with dt)
         mouse_pos = pg.mouse.get_pos()
         pause_btn.update(mouse_pos, dt)
-        hud_help_btn.update(mouse_pos, dt)
         pause_btn.draw(screen)
-        hud_help_btn.draw(screen)
 
-    # main menu loop
+    # --- Main menu loop ---
     in_menu = True
     while in_menu:
         dt = clock.tick(FPS)
         for ev in pg.event.get():
             if ev.type == pg.QUIT:
-                pg.quit()
-                return
+                if mixer_ok:
+                    try: pg.mixer.music.stop(); pg.mixer.quit()
+                    except Exception: pass
+                pg.quit(); return
             if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                 mpos = pg.mouse.get_pos()
                 for b in menu_buttons:
                     if b.clicked(mpos):
                         lbl = b.text
                         if lbl == "Start Game":
-                            in_menu = False
-                            break
+                            in_menu = False; break
                         elif lbl == "Leaderboards":
                             res = show_leaderboard_screen()
                             if res == 'quit':
-                                pg.quit()
-                                return
+                                if mixer_ok:
+                                    try: pg.mixer.music.stop(); pg.mixer.quit()
+                                    except Exception: pass
+                                pg.quit(); return
                         elif lbl == "Help":
                             show_help_screen()
                         elif lbl == "Quit":
-                            pg.quit()
-                            return
+                            if mixer_ok:
+                                try: pg.mixer.music.stop(); pg.mixer.quit()
+                                except Exception: pass
+                            pg.quit(); return
+            if ev.type == pg.KEYDOWN:
+                if ev.key in (pg.K_RETURN,):
+                    in_menu = False
+
         draw_menu(dt)
 
-    # gameplay loop
+    # --- Main gameplay loop ---
     running = True
     while running:
         dt = clock.tick(FPS)
@@ -590,77 +595,159 @@ def run_game(username, user_id, selected_car, difficulty):
                     paused = paused_before
             if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                 mx, my = ev.pos
-                # pause icon click
                 if pause_btn.clicked((mx, my)):
                     paused = not paused
-                if hud_help_btn.clicked((mx, my)):
-                    paused_before = paused
-                    paused = True
-                    show_help_screen()
-                    paused = paused_before
 
+        # --- Pause overlay ---
         if paused:
-            # pause loop - separate event handling so clicks are reliable
+            slider_drag = False
+            vol = cfg.get('music_volume', music_volume)
+            music_enabled = cfg.get('music_on', True)
+
+            bw = 200; bh = 48
+            left_x = SCREEN_W//2 - bw - 12
+            resume_b = Button((left_x, SCREEN_H//2 - 64, bw, bh), "Resume", font)
+            lb_b     = Button((left_x, SCREEN_H//2 - 6,  bw, bh), "Leaderboards", font)
+            help_b   = Button((left_x, SCREEN_H//2 + 52, bw, bh), "Help", font)
+            quit_b   = Button((left_x, SCREEN_H//2 + 110,bw, bh), "Quit", font)
+
+            panel_x = SCREEN_W//2 + 8
+            panel_w = SCREEN_W - panel_x - 16
+            panel_y = SCREEN_H//2 - 120
+            s_x = panel_x + 18
+            s_y = panel_y + 163
+            s_w = panel_w - 36
+            s_h = 12
+
             while paused:
                 dt_p = clock.tick(FPS)
-                mouse_pos = pg.mouse.get_pos()
-                # overlay
+                mx, my = pg.mouse.get_pos()
+
+                for ev2 in pg.event.get():
+                    if ev2.type == pg.QUIT:
+                        if mixer_ok:
+                            try: pg.mixer.music.stop(); pg.mixer.quit()
+                            except Exception: pass
+                        pg.quit(); return
+                    if ev2.type == pg.KEYDOWN:
+                        if ev2.key in (pg.K_RETURN, pg.K_p):
+                            paused = False; break
+                        if ev2.key == pg.K_ESCAPE:
+                            paused = False; running = False; break
+                        if ev2.key == pg.K_LEFT:
+                            vol = max(0.0, vol - 0.05)
+                            cfg['music_volume'] = vol
+                            cfg['music_on'] = vol > 0.001
+                            if mixer_ok and music_loaded:
+                                try: pg.mixer.music.set_volume(vol if cfg.get('music_on', True) else 0.0)
+                                except Exception: pass
+                            save_config(cfg)
+                        if ev2.key == pg.K_RIGHT:
+                            vol = min(1.0, vol + 0.05)
+                            cfg['music_volume'] = vol
+                            cfg['music_on'] = vol > 0.001
+                            if mixer_ok and music_loaded:
+                                try: pg.mixer.music.set_volume(vol if cfg.get('music_on', True) else 0.0)
+                                except Exception: pass
+                            save_config(cfg)
+
+                    if ev2.type == pg.MOUSEBUTTONDOWN and ev2.button == 1:
+                        if resume_b.clicked((mx, my)):
+                            paused = False; break
+                        if lb_b.clicked((mx, my)):
+                            show_leaderboard_screen()
+                        if help_b.clicked((mx, my)):
+                            show_help_screen()
+                        if quit_b.clicked((mx, my)):
+                            paused = False; running = False; break
+
+                        if s_x <= mx <= s_x + s_w and s_y - 8 <= my <= s_y + s_h + 8:
+                            slider_drag = True
+                            rel = (mx - s_x) / s_w
+                            vol = max(0.0, min(1.0, rel))
+                            cfg['music_volume'] = vol
+                            cfg['music_on'] = vol > 0.001
+                            if mixer_ok and music_loaded:
+                                try: pg.mixer.music.set_volume(vol if cfg.get('music_on', True) else 0.0)
+                                except Exception: pass
+                            save_config(cfg)
+
+                        toggle_rect = pg.Rect(panel_x + 18, panel_y + 105, 120, 28)
+                        if toggle_rect.collidepoint(mx, my):
+                            music_enabled = not music_enabled
+                            cfg['music_on'] = music_enabled
+                            if mixer_ok and music_loaded:
+                                try:
+                                    if music_enabled:
+                                        pg.mixer.music.set_volume(cfg.get('music_volume', 0.6))
+                                        if not pg.mixer.music.get_busy():
+                                            pg.mixer.music.play(-1)
+                                    else:
+                                        pg.mixer.music.set_volume(0.0)
+                                except Exception:
+                                    pass
+                            save_config(cfg)
+
+                    if ev2.type == pg.MOUSEBUTTONUP and ev2.button == 1:
+                        slider_drag = False
+
+                    if ev2.type == pg.MOUSEMOTION and slider_drag:
+                        rel = (mx - s_x) / s_w
+                        vol = max(0.0, min(1.0, rel))
+                        cfg['music_volume'] = vol
+                        cfg['music_on'] = vol > 0.001
+                        if mixer_ok and music_loaded:
+                            try: pg.mixer.music.set_volume(vol if cfg.get('music_on', True) else 0.0)
+                            except Exception: pass
+                        save_config(cfg)
+
+                # Draw overlay and UI
                 overlay = pg.Surface((SCREEN_W, SCREEN_H), pg.SRCALPHA)
                 overlay.fill((0,0,0,200))
                 screen.blit(overlay, (0,0))
 
-                pause_txt = big_font.render("PAUSED", True, (230,230,230))
-                screen.blit(pause_txt, (SCREEN_W//2 - pause_txt.get_width()//2, SCREEN_H//2 - 80))
+                mouse_pos = (mx, my)
+                for b in (resume_b, lb_b, help_b, quit_b):
+                    b.update(mouse_pos, dt_p)
+                    b.draw(screen)
 
-                bw = 180; bh = 48
-                resume_b = Button((SCREEN_W//2 - bw//2, SCREEN_H//2 - 10, bw, bh), "Resume", font)
-                menu_b = Button((SCREEN_W//2 - bw//2, SCREEN_H//2 + 50, bw, bh), "Menu", font)
+                pg.draw.rect(screen, DARK_PANEL, (panel_x, panel_y + 56, panel_w, 165), border_radius=12)
+                pg.draw.rect(screen, (30,30,30), (panel_x+8, panel_y+64, panel_w-16, 149), border_radius=10)
+                title = font.render("Settings", True, ACCENT)
+                screen.blit(title, (panel_x + 18, panel_y + 68))
 
-                resume_b.update(mouse_pos, dt_p); menu_b.update(mouse_pos, dt_p)
-                resume_b.draw(screen); menu_b.draw(screen)
+                toggle_rect = pg.Rect(panel_x + 18, panel_y + 105, 120, 28)
+                pg.draw.rect(screen, (40,40,40), toggle_rect, border_radius=8)
+                ttxt = font.render("Music ON" if cfg.get('music_on', True) else "Music OFF", True, (230,230,230))
+                screen.blit(ttxt, (toggle_rect.x + 20, toggle_rect.y + 1))
 
-                # also draw small centered icons so player sees consistent UI while paused
-                pause_btn.update(mouse_pos, dt_p); hud_help_btn.update(mouse_pos, dt_p)
-                pause_btn.draw(screen); hud_help_btn.draw(screen)
+                vlbl = font.render("Volume", True, (200,200,200))
+                screen.blit(vlbl, (panel_x + 18, panel_y + 135))
+                pg.draw.rect(screen, (60,60,60), (s_x, s_y, s_w, s_h), border_radius=6)
+                fill_w = int(s_w * vol)
+                pg.draw.rect(screen, ACCENT, (s_x, s_y, fill_w, s_h), border_radius=6)
+                knob_x = s_x + fill_w
+                pg.draw.circle(screen, (220,220,220), (knob_x, s_y + s_h//2), 8)
+                vol_pct = int(vol * 100)
+                vol_txt = font.render(f"{vol_pct}%", True, (200,200,200))
+                screen.blit(vol_txt, (panel_x + 18, panel_y + 180))
+
+                hint = font.render("Enter = Resume | Esc = Quit to menu | ←/→ adjust vol", True, (160,160,160))
+                screen.blit(hint, (SCREEN_W//2 - hint.get_width()//2, panel_y + 320))
+                pause_title = big_font.render("PAUSED", True, (230,230,230))
+                screen.blit(pause_title, (SCREEN_W//2 - pause_title.get_width()//2, SCREEN_H//2 - 180))
+
+                pause_btn.update(mouse_pos, dt_p)
+                pause_btn.draw(screen)
 
                 pg.display.flip()
 
-                for ev2 in pg.event.get():
-                    if ev2.type == pg.QUIT:
-                        pg.quit()
-                        return
-                    if ev2.type == pg.KEYDOWN:
-                        if ev2.key == pg.K_p:
-                            paused = False
-                            break
-                        if ev2.key == pg.K_ESCAPE:
-                            # treat ESC as back to menu
-                            paused = False
-                            running = False
-                            break
-                    if ev2.type == pg.MOUSEBUTTONDOWN and ev2.button == 1:
-                        mx, my = ev2.pos
-                        if resume_b.clicked((mx, my)):
-                            paused = False
-                            break
-                        if menu_b.clicked((mx, my)):
-                            paused = False
-                            running = False
-                            break
-                        # clicks on the centered icon buttons (help/pause) should still work
-                        if hud_help_btn.clicked((mx, my)):
-                            # open help overlay (keeps paused state after closing)
-                            show_help_screen()
-                        if pause_btn.clicked((mx, my)):
-                            paused = False
-                            break
+            # Persist final config after unpausing
+            cfg['music_volume'] = vol
+            cfg['music_on'] = cfg.get('music_on', True) and (cfg.get('music_volume', vol) > 0.001)
+            save_config(cfg)
 
-                # when loop continues it'll re-evaluate paused
-            # end paused loop
-            # continue main loop to prevent double-processing
-            continue
-
-        # regular update / spawn / physics
+        # spawn timing
         now = pg.time.get_ticks()
         if now - last_spawn > spawn_ms:
             spawn()
@@ -669,9 +756,7 @@ def run_game(username, user_id, selected_car, difficulty):
 
         rem = []
         for e in enemies:
-            e['rect'].y += e['speed']
-
-            # collision: prefer masks, fallback to shrunk rects
+            e['rect'].y += e['speed'] + (base_scroll * 0.15)
             collided = False
             if player_mask is not None and enemy_mask is not None:
                 off = (int(e['rect'].x - player_rect.x), int(e['rect'].y - player_rect.y))
@@ -699,62 +784,72 @@ def run_game(username, user_id, selected_car, difficulty):
                 dist = abs(ec - pc)
                 if dist <= CLOSE_THRESH:
                     score += 250
+                    spawn_popup("+250", pc, player_rect.y - 20)
                 else:
                     score += 150
+                    spawn_popup("+150", pc, player_rect.y - 20)
 
             if e['rect'].y > SCREEN_H + 200:
                 rem.append(e)
 
         for r in rem:
-            try:
-                enemies.remove(r)
-            except ValueError:
-                pass
+            try: enemies.remove(r)
+            except ValueError: pass
 
+        # smooth lane interpolation
         if abs(player_rect.x - target_x) > 1:
+            step = lane_change_speed * (dt * 0.06)
             if player_rect.x < target_x:
-                player_rect.x = min(target_x, player_rect.x + lane_change_speed)
+                player_rect.x = min(target_x, player_rect.x + step)
             else:
-                player_rect.x = max(target_x, player_rect.x - lane_change_speed)
+                player_rect.x = max(target_x, player_rect.x - step)
 
-        # scrolling background uses road.png (no programmatic lane creation)
+        # background scroll
+        scroll = base_scroll * (dt / 16.67)
         offset = (offset + scroll) % max(1, road_h)
+
         screen.fill(DARK_BG)
-        gx = -offset
+
+        gx = offset - grass.get_height()
         while gx < SCREEN_H:
             screen.blit(grass, (0, gx))
             screen.blit(grass, (SCREEN_W - grass.get_width(), gx))
             gx += grass.get_height()
 
-        rx = (SCREEN_W - road.get_width())//2
-        ry = -offset
+        rx = (SCREEN_W - road.get_width()) // 2
+        ry = offset - road_h
         while ry < SCREEN_H:
             screen.blit(road, (rx, ry))
             ry += road_h
 
-        # draw enemies & player
+        update_particles_and_floating(dt, screen, scroll_effect=(base_scroll * 0.02))
+
         for e in enemies:
             screen.blit(enemy_img, (e['rect'].x, e['rect'].y))
+        shadow = pg.Surface((player_rect.w, 10), pg.SRCALPHA)
+        shadow.fill((0,0,0,80))
+        screen.blit(shadow, (player_rect.x, player_rect.y + player_rect.h - 8))
         screen.blit(player_img, (player_rect.x, player_rect.y))
 
-        # draw HUD (score + pause/help buttons)
         draw_hud(dt)
+
         pg.display.flip()
 
-    # Game over UI
+    # --- Game over ---
     def show_game_over_screen():
-        show = True
         bw = 180; bh = 48
         b_restart = Button((SCREEN_W//2 - bw//2, SCREEN_H//2 + 20, bw, bh), "Restart", font)
         b_view = Button((SCREEN_W//2 - bw - 10, SCREEN_H//2 + 80, bw, bh), "Leaderboard", font)
         b_menu = Button((SCREEN_W//2 + 10, SCREEN_H//2 + 80, bw, bh), "Menu", font)
 
-        while show:
+        while True:
             dt = clock.tick(FPS)
             mouse_pos = pg.mouse.get_pos()
             for ev in pg.event.get():
                 if ev.type == pg.QUIT: return "quit"
-                if ev.type == pg.KEYDOWN and ev.key == pg.K_ESCAPE: return "menu"
+                if ev.type == pg.KEYDOWN:
+                    if ev.key == pg.K_ESCAPE: return "menu"
+                    if ev.key == pg.K_RETURN: return "restart"
                 if ev.type == pg.MOUSEBUTTONDOWN and ev.button == 1:
                     mpos = pg.mouse.get_pos()
                     if b_restart.clicked(mpos): return "restart"
@@ -773,9 +868,7 @@ def run_game(username, user_id, selected_car, difficulty):
 
             pg.display.flip()
 
-        return "menu"
-
-    # save score
+    # Save score if user logged in
     if user_id:
         try:
             save_score(user_id, score, difficulty)
@@ -787,9 +880,16 @@ def run_game(username, user_id, selected_car, difficulty):
     if res == "leaderboard":
         show_leaderboard_screen()
     elif res == "restart":
+        if mixer_ok:
+            try: pg.mixer.music.stop(); pg.mixer.quit()
+            except Exception: pass
         pg.quit()
         time.sleep(0.08)
         return run_game(username, user_id, selected_car, difficulty)
+
+    if mixer_ok:
+        try: pg.mixer.music.stop(); pg.mixer.quit()
+        except Exception: pass
 
     pg.quit()
     return
