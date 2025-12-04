@@ -272,6 +272,42 @@ class Launcher:
 
         threading.Thread(target=_init, daemon=True).start()
 
+    def _reinit_mixer_if_needed(self):
+        """Ensure pygame.mixer is initialized and launcher music is loaded/playing."""
+        if not PYGAME_AVAILABLE or not self.music_file:
+            return
+
+        try:
+            # if mixer was quit by the game, re-init it
+            if not getattr(pg_mixer.mixer, 'get_init', lambda: False)():
+                pg_mixer.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+
+            # try to (re)load the music file
+            try:
+                pg_mixer.mixer.music.load(self.music_file)
+            except Exception:
+                # if load fails, leave it (update label will reflect no file)
+                pass
+
+            # set volume and start playing if user wants music
+            pg_mixer.mixer.music.set_volume(self.cfg.get('music_volume', self.music_volume))
+            if self.cfg.get('music_on', True):
+                try:
+                    if not pg_mixer.mixer.music.get_busy():
+                        pg_mixer.mixer.music.play(-1)
+                except Exception:
+                    pass
+
+        except Exception:
+            # be defensive: ignore errors but ensure UI label updates
+            pass
+        finally:
+            try:
+                self.root.after(0, self._update_music_status_label)
+            except Exception:
+                pass
+
+
     # --- UI build ---
     def _build_ui(self):
         # header
@@ -510,6 +546,14 @@ class Launcher:
             messagebox.showerror('Game error', f'Game crashed: {e}')
         finally:
             self.root.deiconify()
+
+            # re-init mixer if the game quit it
+            try:
+                self._reinit_mixer_if_needed()
+            except Exception:
+                pass
+
+            # resume launcher music if it was paused and user setting allows
             if did_pause and PYGAME_AVAILABLE and getattr(pg_mixer, 'mixer', None) and getattr(pg_mixer.mixer, 'get_init', lambda: False)():
                 try:
                     if self.cfg.get('music_on', True):
@@ -518,6 +562,7 @@ class Launcher:
                     pass
 
             self.show_menu_view()
+
 
     # --- garage ---
     def show_garage(self):
