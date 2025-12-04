@@ -1,9 +1,3 @@
-"""
-launcher.py — cleaned
-Minimal, focused comments added to explain high-level structure and important behaviours.
-Remaining code is functionally identical to your supplied launcher.
-"""
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
