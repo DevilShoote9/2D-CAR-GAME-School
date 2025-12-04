@@ -127,6 +127,11 @@ class Launcher:
 
     def __init__(self, root):
         self.root = root
+        # set app icon
+        try:
+            self.root.iconbitmap("assets/logo.ico")
+        except Exception as e:
+            print("Icon load failed:", e)
         self.root.title("Car Dodger — Launcher")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
