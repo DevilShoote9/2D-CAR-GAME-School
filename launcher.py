@@ -1,21 +1,32 @@
+# launcher.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 from pathlib import Path
 import json
 import importlib
-import db
 import threading
 import time
 from pathlib import Path as _Path
 
-# optional pygame mixer for background music; launcher works without it
-try:
-    import pygame as pg_mixer
-    PYGAME_AVAILABLE = True
-except Exception:
-    pg_mixer = None
-    PYGAME_AVAILABLE = False
+import subprocess, sys
+
+# --- Auto-install required modules ---
+def install_missing(pkg):
+    try:
+        __import__(pkg)
+    except ImportError:
+        print(f"[Launcher] Installing missing package: {pkg}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+
+for lib in ["pygame", "Pillow"]:
+    install_missing(lib)
+
+import pygame as pg_mixer
+PYGAME_AVAILABLE = True
+
+# Custom Import
+import db
 
 # Paths and UI constants
 BASE_DIR = Path(__file__).resolve().parent
@@ -43,7 +54,7 @@ DEFAULT_CONFIG = {
 }
 
 # simple scaling helper for fonts/layout
-SCALE = WIDTH / 480.0
+SCALE = WIDTH/480
 
 def scaled(v):
     return max(8, int(v * SCALE))
@@ -171,7 +182,7 @@ class Launcher:
         if self.cfg.get('last_username') and self.cfg.get('session_active'):
             self.root.after(150, self._show_resume_modal)
         else:
-            self.show_login_minimal()
+            self.show_login()
 
     # --- window / key helpers ---
     def center_window(self, root, w=WIDTH, h=HEIGHT):
@@ -376,8 +387,8 @@ class Launcher:
             tk.Label(self.auth_frame, text=f"{self.username}", bg=PANEL, fg=FG, font=('Arial', scaled(9), 'bold')).pack(side='left', padx=(0,6))
             tk.Label(self.auth_frame, text="●", bg=PANEL, fg=ACCENT, font=('Arial', scaled(9))).pack(side='left')
         else:
-            DarkButton(self.auth_frame, text="Login", width=9, command=self.show_login_minimal).pack(side='right', padx=(6,0))
-            DarkButton(self.auth_frame, text="Sign Up", width=9, command=self.show_signup_minimal).pack(side='right', padx=(0,6))
+            DarkButton(self.auth_frame, text="Login", width=9, command=self.show_login).pack(side='right', padx=(6,0))
+            DarkButton(self.auth_frame, text="Sign Up", width=9, command=self.show_signup).pack(side='right', padx=(0,6))
 
     def clear_card(self):
         for c in list(self.card.winfo_children()):
@@ -391,7 +402,7 @@ class Launcher:
     def _show_resume_modal(self):
         user = self.cfg.get('last_username')
         if not user:
-            return self.show_login_minimal()
+            return self.show_login()
         dlg = tk.Toplevel(self.root)
         dlg.title('Resume Session'); dlg.transient(self.root); dlg.grab_set(); dlg.resizable(False, False)
         self.center_window(dlg, 360, 190)
@@ -418,14 +429,14 @@ class Launcher:
 
         btns = tk.Frame(top, bg=PANEL); btns.pack(fill='x', pady=(6,0))
         DarkButton(btns, text='Resume', width=12, command=do_resume).pack(side='left')
-        DarkButton(btns, text='Back', width=12, command=lambda: (dlg.destroy(), self.show_login_minimal())).pack(side='left', padx=8)
+        DarkButton(btns, text='Back', width=12, command=lambda: (dlg.destroy(), self.show_login())).pack(side='left', padx=8)
 
         dlg.bind('<Return>', lambda e: do_resume())
-        dlg.bind('<Escape>', lambda e: (dlg.destroy(), self.show_login_minimal()))
+        dlg.bind('<Escape>', lambda e: (dlg.destroy(), self.show_login()))
         pwd.focus_set()
 
     # --- login / signup views ---
-    def show_login_minimal(self):
+    def show_login(self):
         self.clear_card(); self._build_auth_widgets()
         tk.Label(self.card, text='Login', bg=PANEL, fg=FG, font=('Helvetica', scaled(13), 'bold')).pack(anchor='w', pady=(0,6))
         frm = tk.Frame(self.card, bg=PANEL); frm.pack(fill='x')
@@ -437,14 +448,14 @@ class Launcher:
         self.e_pass.pack(fill='x', pady=(4,10))
         row = tk.Frame(self.card, bg=PANEL); row.pack(fill='x', pady=(6,0))
         DarkButton(row, text='Login', width=12, command=self.do_login).pack(side='left')
-        DarkButton(row, text='Sign Up', width=12, command=self.show_signup_minimal).pack(side='left', padx=(8,0))
+        DarkButton(row, text='Sign Up', width=12, command=self.show_signup).pack(side='left', padx=(8,0))
         tk.Label(self.card, text='Ctrl+Q to quit', bg=PANEL, fg=MUTED, font=('Arial', scaled(8))).pack(side='bottom', anchor='w', pady=(12,0))
 
         self._set_enter_binding(self.do_login)
         self.e_pass.bind('<Return>', lambda e: self.do_login())
         self.e_user.focus_set()
 
-    def show_signup_minimal(self):
+    def show_signup(self):
         self.clear_card(); self._build_auth_widgets()
         tk.Label(self.card, text='Create Account', bg=PANEL, fg=FG, font=('Helvetica', scaled(13), 'bold')).pack(anchor='w', pady=(0,6))
         frm = tk.Frame(self.card, bg=PANEL); frm.pack(fill='x')
@@ -456,7 +467,7 @@ class Launcher:
         self.s_pass.pack(fill='x', pady=(4,10))
         row = tk.Frame(self.card, bg=PANEL); row.pack(fill='x', pady=(6,0))
         DarkButton(row, text='Create', width=12, command=self.create_account).pack(side='left')
-        DarkButton(row, text='Back', width=12, command=self.show_login_minimal).pack(side='left', padx=(8,0))
+        DarkButton(row, text='Back', width=12, command=self.show_login).pack(side='left', padx=(8,0))
 
         self._set_enter_binding(self.create_account)
         self.s_pass.bind('<Return>', lambda e: self.create_account())
@@ -705,8 +716,6 @@ class Launcher:
         vol = ttk.Scale(vol_frame, from_=0.0, to=1.0, orient='horizontal', variable=self.volume_var, command=self._on_volume_change)
         vol.pack(fill='x', padx=(0,8))
         row = tk.Frame(self.card, bg=PANEL); row.pack(fill='x', pady=(10,0))
-        DarkButton(row, text='Save', width=10, command=self._save_settings).pack(side='left')
-        DarkButton(row, text='Back', width=10, command=self.show_menu_view).pack(side='left', padx=8)
 
         self._set_enter_binding(self._save_settings)
         self.root.bind('<Escape>', lambda e: self.show_menu_view())
@@ -811,7 +820,7 @@ Score & Leaderboards:
         ok = db.add_user(u, p)
         if ok:
             messagebox.showinfo('Success', 'Account created. Login now.')
-            self.cfg['last_username'] = u; self.cfg['session_active'] = False; save_config(self.cfg); self.show_login_minimal()
+            self.cfg['last_username'] = u; self.cfg['session_active'] = False; save_config(self.cfg); self.show_login()
         else:
             messagebox.showerror('Error', 'Username exists')
 
@@ -839,7 +848,7 @@ Score & Leaderboards:
         self.user_id = None; self.username = None
         self.cfg.pop('last_username', None); self.cfg['session_active'] = False; save_config(self.cfg)
         self.selected_car = self.cfg.get('selected_car', DEFAULT_CONFIG['selected_car'])
-        self._build_auth_widgets(); self.show_login_minimal()
+        self._build_auth_widgets(); self.show_login()
 
     def _on_quit(self):
         # confirm then stop music and destroy window

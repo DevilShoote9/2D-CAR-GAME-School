@@ -1,10 +1,10 @@
+# game.py
 import pygame as pg
 from pathlib import Path
 import random as rnd
 import db
 from db import save_score
 import time
-import math
 import json
 
 # --- Paths & constants ---
@@ -207,7 +207,6 @@ def run_game(username, user_id, selected_car, difficulty):
 
     # Load assets (use placeholders when missing)
     road = load_image("road.png", SCREEN_W, SCREEN_H//2)
-    grass = load_image("grass.png", 80, SCREEN_H//3)
     player_imgs = {
         'player1.png': load_image("player1.png", PLAYER_W, PLAYER_H),
         'player2.png': load_image("player2.png", PLAYER_W, PLAYER_H),
@@ -809,12 +808,6 @@ def run_game(username, user_id, selected_car, difficulty):
         offset = (offset + scroll) % max(1, road_h)
 
         screen.fill(DARK_BG)
-
-        gx = offset - grass.get_height()
-        while gx < SCREEN_H:
-            screen.blit(grass, (0, gx))
-            screen.blit(grass, (SCREEN_W - grass.get_width(), gx))
-            gx += grass.get_height()
 
         rx = (SCREEN_W - road.get_width()) // 2
         ry = offset - road_h
