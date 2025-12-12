@@ -44,20 +44,25 @@ The project includes user accounts, car selection, settings, background music, l
 ## 📁 Project Structure
 
 ```
-Game/
+CarDodgerProject/
 │
 ├── assets/
+│   ├── bg_game.mp3
+│   ├── bg_launcher.mp3
+│   ├── enemy.png
+│   ├── logo.ico
 │   ├── player1.png
 │   ├── player2.png
-│   ├── enemy.png
+│   ├── player3.png
+│   ├── player4.png
+│   ├── player5.png
 │   ├── road.png
-│   ├── grass.png
-│   ├── bgmusic.mp3
 │
-├── launcher.py      # Tkinter launcher UI
-├── game.py          # Pygame arcade game
-├── db.py            # SQLite helper functions
+├── car_game.db      # SQLite database 
 ├── config.json      # User settings (car, volume, bgm)
+├── db.py            # SQLite helper functions
+├── game.py          # Pygame arcade game
+├── launcher.py      # Tkinter launcher UI
 └── README.md
 ```
 
@@ -84,6 +89,8 @@ pip install pygame pillow
 ```
 
 (Tkinter and sqlite3 come pre-installed with Python.)
+
+- Can skip (Taken care in launcher.py)
 
 ### **2. Run the launcher**
 
@@ -127,16 +134,18 @@ python launcher.py
 
 ### **Users Table**
 
+* id
 * username
 * password
 * selected_car
 
 ### **Scores Table**
 
-* username
-* mode
+* id
+* user_id
 * score
-* date/time
+* difficulty
+* created_at
 
 Leaderboards are generated **per mode** to avoid duplicates.
 
@@ -158,7 +167,7 @@ Perfect for CBSE Class 12 Computer Science practical/project submission.
 
 ## 📌 Author
 
-**Omesh Goyal**
+**Omesh Goyal & Nischeyjeet Singh**
 Class XII — Computer Science Project (2025–26)
 
 
